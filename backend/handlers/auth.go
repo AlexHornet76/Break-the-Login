@@ -117,35 +117,23 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 
 // Me - returneaza datele utilizatorului logat, vulnerabil: fara validare token, fara expirare token
 func Me(w http.ResponseWriter, r *http.Request) {
-	tokenStr := ""
-
-	// Încearcă din cookie
-	if cookie, err := r.Cookie("auth_token"); err == nil {
-		tokenStr = cookie.Value
-	}
-	// Sau din header Authorization: Bearer <token>
-	if auth := r.Header.Get("Authorization"); auth != "" && len(auth) > 7 {
-		tokenStr = auth[7:]
-	}
-
-	if tokenStr == "" {
+	userID, err := getUserIDFromRequest(r)
+	if err != nil {
 		http.Error(w, `{"error":"Neautentificat"}`, 401)
 		return
 	}
 
-	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		http.Error(w, `{"error":"Token invalid"}`, 401)
+	var email string
+	err = db.DB.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&email)
+	if err != nil {
+		http.Error(w, `{"error":"User invalid"}`, 401)
 		return
 	}
 
-	claims := token.Claims.(jwt.MapClaims)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"user_id": claims["user_id"],
-		"email":   claims["email"],
+		"user_id": userID,
+		"email":   email,
 	})
 }
 

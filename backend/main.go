@@ -24,10 +24,17 @@ func main() {
 	mux.HandleFunc("POST /api/forgot-password", handlers.ForgotPassword)
 	mux.HandleFunc("POST /api/reset-password", handlers.ResetPassword)
 
+	// Tickets
+	mux.HandleFunc("POST /api/tickets", handlers.CreateTicket)
+	mux.HandleFunc("GET /api/tickets", handlers.ListTickets)
+
+	mux.HandleFunc("GET /api/tickets/", handlers.GetTicketByID)
+	mux.HandleFunc("PUT /api/tickets/", handlers.UpdateTicketByID)
+
 	// CORS - vulnerabil: AllowAll - nu restrictioneaza originile
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173"},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PUT"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
 	})
