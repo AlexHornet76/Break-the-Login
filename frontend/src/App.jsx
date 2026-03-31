@@ -4,6 +4,7 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import ForgotPassword from './pages/ForgotPassword'
 import ProtectedRoute from './components/ProtectedRoute'
+import Tickets from './pages/Tickets'
 
 export default function App() {
   return (
@@ -24,6 +25,13 @@ export default function App() {
             <Dashboard />
           </ProtectedRoute>
         } />
+
+        <Route path="/tickets" element={
+          <ProtectedRoute>
+            <Tickets />
+          </ProtectedRoute>
+        } />
+
       </Routes>
     </BrowserRouter>
   )
