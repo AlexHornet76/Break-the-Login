@@ -39,6 +39,14 @@ func createTables() {
 		ip_address  TEXT,
 		timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    used BOOLEAN DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+	);
 	`
 	_, err := DB.Exec(query)
 	if err != nil {

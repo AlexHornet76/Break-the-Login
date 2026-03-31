@@ -20,7 +20,7 @@ func main() {
 	mux.HandleFunc("POST /api/register", handlers.Register)
 	mux.HandleFunc("POST /api/login", handlers.Login)
 	mux.HandleFunc("POST /api/logout", handlers.Logout)
-	mux.HandleFunc("GET  /api/me", handlers.Me)
+	mux.HandleFunc("GET /api/me", handlers.Me)
 	mux.HandleFunc("POST /api/forgot-password", handlers.ForgotPassword)
 	mux.HandleFunc("POST /api/reset-password", handlers.ResetPassword)
 
