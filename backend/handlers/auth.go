@@ -9,6 +9,7 @@ import (
 	"Break-the-Login/backend/db"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Cheie JWT - vulnerabila: hardcodata in cod
@@ -27,20 +28,25 @@ type LoginRequest struct {
 // Register vulnerabil: accepta parole slabe, fara validare
 func Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
+	json.NewDecoder(r.Body).Decode(&req)
 
 	//fara validare - lungime si complexitate
 
 	if req.Email == "" || req.Password == "" || !validatePassword(req.Password) {
-	// 4.1: mesaj generic pentru a nu confirma validitatea emailului sau parolei
-	http.Error(w, `{"error":"Invalid input"}`, 400)
-	return
-}
+		// 4.1: mesaj generic pentru a nu confirma validitatea emailului sau parolei
+		http.Error(w, `{"error":"Invalid input"}`, 400)
+		return
+	}
 
-	// stocare parola in clar
+	// 4.2
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, `{"error":"Server error"}`, 500)
+		return
+	}
 	_, err = db.DB.Exec(
 		"INSERT INTO users (email, password) VALUES (?, ?)",
-		req.Email, req.Password,
+		req.Email, string(hash),
 	)
 	if err != nil {
 		// VULNERABIL: user enumeration
@@ -71,8 +77,11 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if storedPassword != req.Password {
-		http.Error(w, `{"error":"Parola gresita"}`, 401)
+	// 4.2
+	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(req.Password))
+	if err != nil {
+		// parola greșită (sau hash invalid)
+		http.Error(w, `{"error":"Invalid credentials"}`, 401)
 		return
 	}
 
@@ -155,7 +164,6 @@ func ForgotPassword(w http.ResponseWriter, r *http.Request) {
 
 	// VULNERABIL: token = timestamp in secunde — usor de ghicit/brute-forced
 	token := fmt.Sprintf("%d", time.Now().Unix())
-
 	db.DB.Exec("INSERT INTO reset_tokens (user_id, token) VALUES (?, ?)", userID, token)
 
 	// token-ul este trimis in raspuns, nu prin email
@@ -190,7 +198,18 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db.DB.Exec("UPDATE users SET password = ? WHERE id = ?", body.Password, userID)
+	// 4.2
+	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, `{"error":"Server error"}`, 500)
+		return
+	}
+
+	_, err = db.DB.Exec("UPDATE users SET password = ? WHERE id = ?", string(hash), userID)
+	if err != nil {
+		http.Error(w, `{"error":"Eroare DB"}`, 500)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Parola resetata"})
