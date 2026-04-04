@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 source "$(dirname "$0")/config.sh"
 
 echo "  4.1 - Teste politica parola"
