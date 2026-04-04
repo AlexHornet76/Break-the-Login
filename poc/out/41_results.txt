@@ -1,0 +1,53 @@
+HTTP/1.1 400 Bad Request
+Content-Type: text/plain; charset=utf-8
+Vary: Origin
+X-Content-Type-Options: nosniff
+Date: Sat, 04 Apr 2026 10:24:29 GMT
+Content-Length: 26
+
+{"error":"Invalid input"}
+
+HTTP/1.1 400 Bad Request
+Content-Type: text/plain; charset=utf-8
+Vary: Origin
+X-Content-Type-Options: nosniff
+Date: Sat, 04 Apr 2026 10:24:29 GMT
+Content-Length: 26
+
+{"error":"Invalid input"}
+
+HTTP/1.1 400 Bad Request
+Content-Type: text/plain; charset=utf-8
+Vary: Origin
+X-Content-Type-Options: nosniff
+Date: Sat, 04 Apr 2026 10:24:29 GMT
+Content-Length: 26
+
+{"error":"Invalid input"}
+
+HTTP/1.1 400 Bad Request
+Content-Type: text/plain; charset=utf-8
+Vary: Origin
+X-Content-Type-Options: nosniff
+Date: Sat, 04 Apr 2026 10:24:29 GMT
+Content-Length: 26
+
+{"error":"Invalid input"}
+
+HTTP/1.1 400 Bad Request
+Content-Type: text/plain; charset=utf-8
+Vary: Origin
+X-Content-Type-Options: nosniff
+Date: Sat, 04 Apr 2026 10:24:29 GMT
+Content-Length: 26
+
+{"error":"Invalid input"}
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+Vary: Origin
+Date: Sat, 04 Apr 2026 10:24:29 GMT
+Content-Length: 35
+
+{"message":"Cont creat cu succes"}
+
