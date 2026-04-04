@@ -31,10 +31,11 @@ func Register(w http.ResponseWriter, r *http.Request) {
 
 	//fara validare - lungime si complexitate
 
-	if req.Email == "" || req.Password == "" {
-		http.Error(w, `{"error":"Email si parola sunt obligatorii"}`, 400)
-		return
-	}
+	if req.Email == "" || req.Password == "" || !validatePassword(req.Password) {
+	// 4.1: mesaj generic pentru a nu confirma validitatea emailului sau parolei
+	http.Error(w, `{"error":"Invalid input"}`, 400)
+	return
+}
 
 	// stocare parola in clar
 	_, err = db.DB.Exec(
@@ -174,8 +175,13 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 
+	// 4.1: politica parola + mesaj generic
+	if body.Token == "" || body.Password == "" || !validatePassword(body.Password) {
+		http.Error(w, `{"error":"Invalid input"}`, 400)
+		return
+	}
+
 	var userID int
-	// nu verifica daca tokenul a fost deja folosit (used=false)
 	err := db.DB.QueryRow(
 		"SELECT user_id FROM reset_tokens WHERE token = ?", body.Token,
 	).Scan(&userID)
@@ -184,9 +190,7 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// stochează parola noua in clar
 	db.DB.Exec("UPDATE users SET password = ? WHERE id = ?", body.Password, userID)
-	//nu marcheaza tokenul ca folosit — poate fi reutilizat!
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Parola resetata"})
