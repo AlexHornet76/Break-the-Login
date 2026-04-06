@@ -1,15 +1,14 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"Break-the-Login/backend/db"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -26,17 +25,10 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-const (
-	maxFailedLogins = 5
-	lockoutFor      = 10 * time.Minute
-)
-
 // Register vulnerabil: accepta parole slabe, fara validare
 func Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	json.NewDecoder(r.Body).Decode(&req)
-
-	//fara validare - lungime si complexitate
 
 	if req.Email == "" || req.Password == "" || !validatePassword(req.Password) {
 		// 4.1: mesaj generic pentru a nu confirma validitatea emailului sau parolei
@@ -67,87 +59,99 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Cont creat cu succes"})
 }
 
+// Login cu rate limiting, lockout per cont si mesaje generice pentru erori
 func Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	json.NewDecoder(r.Body).Decode(&req)
 
-	invalid := func() {
-		// mesaj unic (ajuta si la 4.4)
-		http.Error(w, `{"error":"Invalid credentials"}`, http.StatusUnauthorized)
-	}
-
-	if req.Email == "" || req.Password == "" {
-		invalid()
-		return
-	}
-
-	var (
-		userID       int
-		passwordHash string
-		failedCount  int
-		lockedUntil  sql.NullString
-	)
+	// Cauta userul in baza de date
+	var userID int
+	var storedPassword string
+	var failedLogins int
+	var lockedUntil *time.Time
 
 	err := db.DB.QueryRow(
-		"SELECT id, password, failed_login_count, locked_until FROM users WHERE email = ?",
+		"SELECT id, password, failed_logins, locked_until FROM users WHERE email = ?",
 		req.Email,
-	).Scan(&userID, &passwordHash, &failedCount, &lockedUntil)
+	).Scan(&userID, &storedPassword, &failedLogins, &lockedUntil)
 
 	if err != nil {
-		// nu dezvaluim daca user exista
-		invalid()
+		// FIX 4.1: mesaj generic — nu confirma daca emailul exista sau nu
+		http.Error(w, `{"error":"Invalid credentials"}`, 401)
 		return
 	}
 
-	// lockout check
-	if lockedUntil.Valid && lockedUntil.String != "" {
-		if t, err := time.Parse(time.RFC3339, lockedUntil.String); err == nil {
-			if time.Now().UTC().Before(t) {
-				_, _ = db.DB.Exec(
-					"INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
-					userID, "LOGIN_BLOCKED_LOCKED", r.RemoteAddr,
-				)
-				invalid()
-				return
-			}
-		}
+	// FIX Stage C: verifica lockout per cont inainte de orice altceva
+	// Astfel, chiar daca atacatorul roteste IP-ul (bypass rate limit per IP),
+	// contul ramane blocat dupa N esecuri consecutive.
+	if lockedUntil != nil && time.Now().Before(*lockedUntil) {
+		remaining := time.Until(*lockedUntil).Round(time.Second)
+		http.Error(w, fmt.Sprintf(`{"error":"Account temporarily locked. Try again in %s"}`, remaining), 401)
+		return
 	}
 
-	// bcrypt compare
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
-		failedCount++
+	// 4.2: comparare parola cu bcrypt
+	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(req.Password))
+	if err != nil {
+		// FIX Stage C: incrementeaza failed_logins si aplica lockout dupa 10 esecuri
+		// Lockout se aplica per cont, indiferent de IP — nu poate fi eludat cu IP rotation.
+		db.DB.Exec(`
+			UPDATE users
+			SET
+				failed_logins = failed_logins + 1,
+				locked_until = CASE
+					WHEN failed_logins + 1 >= 10
+					THEN datetime('now', '+15 minutes')
+					ELSE locked_until
+				END
+			WHERE id = ?
+		`, userID)
 
-		var newLocked any = nil
-		if failedCount >= maxFailedLogins {
-			newLocked = time.Now().UTC().Add(lockoutFor).Format(time.RFC3339)
-		}
-
-		_, _ = db.DB.Exec(
-			"UPDATE users SET failed_login_count = ?, locked_until = ? WHERE id = ?",
-			failedCount, newLocked, userID,
-		)
-
-		_, _ = db.DB.Exec(
+		db.DB.Exec(
 			"INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
 			userID, "LOGIN_FAIL", r.RemoteAddr,
 		)
 
-		invalid()
+		http.Error(w, `{"error":"Invalid credentials"}`, 401)
 		return
 	}
 
-	// success => reset counters
-	_, _ = db.DB.Exec("UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?", userID)
-
-	_, _ = db.DB.Exec(
-		"INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
-		userID, "LOGIN_SUCCESS", r.RemoteAddr,
+	// Login reusit — reseteaza contorul de esecuri si lockout-ul
+	db.DB.Exec(
+		"UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?",
+		userID,
 	)
 
-	// pentru 4.3 e suficient ca login sa raspunda 200)
+	// Generare token JWT - vulnerabil: fara expirare, fara refresh token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"email":   req.Email,
+		// fara expirare
+	})
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		http.Error(w, `{"error":"Server error"}`, 500)
+		return
+	}
+
+	// VULNERABIL: cookie fără HttpOnly și Secure
+	http.SetCookie(w, &http.Cookie{
+		Name:  "auth_token",
+		Value: tokenString,
+		Path:  "/",
+		// HttpOnly: true,  <- lipsa, XSS poate fura cookie-ul
+		// Secure: true,    <- lipsa, trimis si pe HTTP
+		// SameSite: http.SameSiteStrictMode, <- lipsa
+	})
+
+	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+		userID, "LOGIN", r.RemoteAddr)
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Autentificare reusita"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Autentificare reusita",
+		"token":   tokenString,
+	})
 }
 
 func Logout(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +166,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Deconectat"})
 }
 
-// Me - returneaza datele utilizatorului logat, vulnerabil: fara validare token, fara expirare token
+// Me - returneaza datele utilizatorului logat
 func Me(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromRequest(r)
 	if err != nil {
@@ -204,7 +208,6 @@ func ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	db.DB.Exec("INSERT INTO reset_tokens (user_id, token) VALUES (?, ?)", userID, token)
 
 	// token-ul este trimis in raspuns, nu prin email
-	// in productie se trimite email — aici il afisam direct
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"message":     "Token generat (in productie se trimite pe email)",
@@ -247,6 +250,12 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Eroare DB"}`, 500)
 		return
 	}
+
+	// Reseteaza lockout-ul si contorul de esecuri dupa reset parola reusit
+	db.DB.Exec("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?", userID)
+
+	// Invalideaza token-ul folosit
+	db.DB.Exec("UPDATE reset_tokens SET used = 1 WHERE token = ?", body.Token)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Parola resetata"})

