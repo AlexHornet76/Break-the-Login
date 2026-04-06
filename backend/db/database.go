@@ -20,9 +20,6 @@ func Init() {
 }
 
 func createTables() {
-	// Tabelul users este vulnerabil
-	// password este stocata in clar
-	// tickets (resurse sensibile pentru IDOR)
 
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
@@ -31,7 +28,8 @@ func createTables() {
         password    TEXT NOT NULL,        -- plain text
         role        TEXT DEFAULT 'USER',
         created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-        locked      BOOLEAN DEFAULT FALSE
+		failed_logins INTEGER DEFAULT 0,
+		locked_until DATETIME
     );
 	CREATE TABLE iF NOT EXISTS audit_logs (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,

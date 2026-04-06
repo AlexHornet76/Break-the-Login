@@ -18,7 +18,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/register", handlers.Register)
-	mux.HandleFunc("POST /api/login", handlers.Login)
+	mux.HandleFunc("POST /api/login", handlers.RateLimitLogin(handlers.Login))
 	mux.HandleFunc("POST /api/logout", handlers.Logout)
 	mux.HandleFunc("GET /api/me", handlers.Me)
 	mux.HandleFunc("POST /api/forgot-password", handlers.ForgotPassword)

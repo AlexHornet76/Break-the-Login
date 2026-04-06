@@ -1,14 +1,15 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"Break-the-Login/backend/db"
 
-	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -24,6 +25,11 @@ type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
+
+const (
+	maxFailedLogins = 5
+	lockoutFor      = 10 * time.Minute
+)
 
 // Register vulnerabil: accepta parole slabe, fara validare
 func Register(w http.ResponseWriter, r *http.Request) {
@@ -61,56 +67,87 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Cont creat cu succes"})
 }
 
-// Login fara rate limiting, vulnerabil la brute-force, mesaje diferite pentru erori
 func Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
-	json.NewDecoder(r.Body).Decode(&req)
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
-	// Cauta userul in baza de date
-	var userID int
-	var storedPassword string
+	invalid := func() {
+		// mesaj unic (ajuta si la 4.4)
+		http.Error(w, `{"error":"Invalid credentials"}`, http.StatusUnauthorized)
+	}
+
+	if req.Email == "" || req.Password == "" {
+		invalid()
+		return
+	}
+
+	var (
+		userID       int
+		passwordHash string
+		failedCount  int
+		lockedUntil  sql.NullString
+	)
+
 	err := db.DB.QueryRow(
-		"SELECT id, password FROM users WHERE email = ?", req.Email,
-	).Scan(&userID, &storedPassword)
+		"SELECT id, password, failed_login_count, locked_until FROM users WHERE email = ?",
+		req.Email,
+	).Scan(&userID, &passwordHash, &failedCount, &lockedUntil)
+
 	if err != nil {
-		http.Error(w, `{"error":"Utilizatorul nu exista"}`, 401)
+		// nu dezvaluim daca user exista
+		invalid()
 		return
 	}
 
-	// 4.2
-	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(req.Password))
-	if err != nil {
-		// parola greșită (sau hash invalid)
-		http.Error(w, `{"error":"Invalid credentials"}`, 401)
+	// lockout check
+	if lockedUntil.Valid && lockedUntil.String != "" {
+		if t, err := time.Parse(time.RFC3339, lockedUntil.String); err == nil {
+			if time.Now().UTC().Before(t) {
+				_, _ = db.DB.Exec(
+					"INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+					userID, "LOGIN_BLOCKED_LOCKED", r.RemoteAddr,
+				)
+				invalid()
+				return
+			}
+		}
+	}
+
+	// bcrypt compare
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
+		failedCount++
+
+		var newLocked any = nil
+		if failedCount >= maxFailedLogins {
+			newLocked = time.Now().UTC().Add(lockoutFor).Format(time.RFC3339)
+		}
+
+		_, _ = db.DB.Exec(
+			"UPDATE users SET failed_login_count = ?, locked_until = ? WHERE id = ?",
+			failedCount, newLocked, userID,
+		)
+
+		_, _ = db.DB.Exec(
+			"INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+			userID, "LOGIN_FAIL", r.RemoteAddr,
+		)
+
+		invalid()
 		return
 	}
 
-	// Generare token JWT - vulnerabil: fara expirare, fara refresh token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"email":   req.Email,
-		// fara expirare
-	})
-	tokenString, err := token.SignedString(jwtSecret)
+	// success => reset counters
+	_, _ = db.DB.Exec("UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?", userID)
 
-	// VULNERABIL: cookie fără HttpOnly și Secure
-	http.SetCookie(w, &http.Cookie{
-		Name:  "auth_token",
-		Value: tokenString,
-		Path:  "/",
-		// HttpOnly: true,  <- lipsa, XSS poate fura cookie-ul
-		// Secure: true,    <- lipsa, trimis si pe HTTP
-		// SameSite: http.SameSiteStrictMode, <- lipsa
-	})
+	_, _ = db.DB.Exec(
+		"INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+		userID, "LOGIN_SUCCESS", r.RemoteAddr,
+	)
 
-	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
-		userID, "LOGIN", r.RemoteAddr)
-
+	// pentru 4.3 e suficient ca login sa raspunda 200)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Autentificare reusita",
-		"token":   tokenString,
-	})
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Autentificare reusita"})
 }
 
 func Logout(w http.ResponseWriter, r *http.Request) {
