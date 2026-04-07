@@ -47,7 +47,6 @@ func Register(w http.ResponseWriter, r *http.Request) {
 		req.Email, string(hash),
 	)
 	if err != nil {
-		// VULNERABIL: user enumeration
 		http.Error(w, `{"error":"Email deja inregistrat"}`, 409)
 		return
 	}
@@ -81,7 +80,6 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FIX Stage C: verifica lockout per cont inainte de orice altceva
 	// Astfel, chiar daca atacatorul roteste IP-ul (bypass rate limit per IP),
 	// contul ramane blocat dupa N esecuri consecutive.
 	if lockedUntil != nil && time.Now().Before(*lockedUntil) {
@@ -93,7 +91,6 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	// 4.2: comparare parola cu bcrypt
 	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(req.Password))
 	if err != nil {
-		// FIX Stage C: incrementeaza failed_logins si aplica lockout dupa 10 esecuri
 		// Lockout se aplica per cont, indiferent de IP — nu poate fi eludat cu IP rotation.
 		db.DB.Exec(`
 			UPDATE users
