@@ -32,3 +32,4 @@ go.work.sum
 # .vscode/
 poc/out/
 poc/out/
+*.db
