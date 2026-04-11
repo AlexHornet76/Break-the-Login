@@ -15,37 +15,43 @@ func Init() {
 	if err != nil {
 		log.Fatal("Nu se poate deschide baza de date:", err)
 	}
-
 	createTables()
 }
 
 func createTables() {
-
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        email       TEXT UNIQUE NOT NULL,
-        password    TEXT NOT NULL,        -- plain text
-        role        TEXT DEFAULT 'USER',
-        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		email         TEXT UNIQUE NOT NULL,
+		password      TEXT NOT NULL,        -- bcrypt hash
+		role          TEXT DEFAULT 'USER',
+		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+
 		failed_logins INTEGER DEFAULT 0,
-		locked_until DATETIME
-    );
-	CREATE TABLE iF NOT EXISTS audit_logs (
+		locked_until  DATETIME,
+
+		token_version INTEGER DEFAULT 0      -- 4.5: revoke tokens on logout/reset
+	);
+
+	CREATE TABLE IF NOT EXISTS audit_logs (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id     INTEGER,
 		action      TEXT NOT NULL,
 		ip_address  TEXT,
 		timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP,
-		resource TEXT,
-  		resource_id TEXT
+		resource    TEXT,
+		resource_id TEXT
 	);
+
 	CREATE TABLE IF NOT EXISTS reset_tokens (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id INTEGER NOT NULL,
-		token TEXT NOT NULL,
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL,
+
+		token_hash TEXT NOT NULL UNIQUE,     -- 4.6: store hash, not raw token
+		expires_at DATETIME NOT NULL,        -- 4.6: expiry
+		used_at    DATETIME,                 -- 4.6: one-time use
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		used BOOLEAN DEFAULT 0,
+
 		FOREIGN KEY (user_id) REFERENCES users(id)
 	);
 
