@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-DB_PATH="${1:-./backend/db/Break-the-Login.db}"
+DB_PATH="${1:-/home/alexhornet76/DASS/Break-the-Login/backend/db/Break-the-Login.db}"
 
-echo "[*] 4.2 - Citire parole din DB (simulare)"
+echo "4.2 - Citire parole din DB"
 echo "    DB_PATH=$DB_PATH"
 echo
 

@@ -10,7 +10,7 @@ set +o pipefail
 
 source "$(dirname "$0")/config.sh"
 
-EXISTING_EMAIL="${1:-}"
+EXISTING_EMAIL="${1:-victim@yahoo.com}"
 WRONG_PASS="${2:-WrongPass_$(date +%s)!}"
 
 LOGIN_URL="$BASE_URL/login"
