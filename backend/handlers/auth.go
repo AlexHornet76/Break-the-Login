@@ -29,7 +29,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
 
-	//fara validare - lungime si complexitate
+	// fara validare - lungime si complexitate
 
 	if req.Email == "" || req.Password == "" {
 		http.Error(w, `{"error":"Email si parola sunt obligatorii"}`, 400)
@@ -104,6 +104,13 @@ func Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func Logout(w http.ResponseWriter, r *http.Request) {
+
+	userID, err := getUserIDFromRequest(r)
+	if err == nil {
+		db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+			userID, "LOGOUT", r.RemoteAddr)
+	}
+
 	// Sterge cookie-ul - vulnerabil: fara HttpOnly si Secure
 	http.SetCookie(w, &http.Cookie{
 		Name:    "auth_token",
@@ -111,6 +118,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 		Path:    "/",
 		Expires: time.Unix(0, 0),
 	})
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Deconectat"})
 }
@@ -129,6 +137,9 @@ func Me(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"User invalid"}`, 401)
 		return
 	}
+
+	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+		userID, "ME", r.RemoteAddr)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -156,6 +167,9 @@ func ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	token := fmt.Sprintf("%d", time.Now().Unix())
 
 	db.DB.Exec("INSERT INTO reset_tokens (user_id, token) VALUES (?, ?)", userID, token)
+
+	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+		userID, "FORGOT_PASSWORD", r.RemoteAddr)
 
 	// token-ul este trimis in raspuns, nu prin email
 	// in productie se trimite email — aici il afisam direct
@@ -187,6 +201,9 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 	// stochează parola noua in clar
 	db.DB.Exec("UPDATE users SET password = ? WHERE id = ?", body.Password, userID)
 	//nu marcheaza tokenul ca folosit — poate fi reutilizat!
+
+	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+		userID, "RESET_PASSWORD", r.RemoteAddr)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Parola resetata"})

@@ -66,7 +66,7 @@ func CreateTicket(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/tickets (VULNERABIL: returneaza toate ticket-urile tuturor)
+// GET /api/tickets (VULNERABIL: returneaza toate ticket-urile)
 func ListTickets(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromRequest(r)
 	if err != nil {
