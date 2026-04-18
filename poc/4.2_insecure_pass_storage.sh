@@ -10,6 +10,6 @@ sqlite3 "$DB_PATH" <<'SQL'
 .headers on
 .mode column
 .width 5 30 30 10 20
-SELECT id, email, password, role, created_at FROM users ORDER BY id DESC LIMIT 5;
+SELECT id, email, password, role, created_at FROM users ORDER BY id DESC LIMIT 10;
 SQL
 
