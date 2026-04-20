@@ -1,66 +1,60 @@
 #!/usr/bin/env bash
 # poc/4.3_lockout_per_account.sh
-# Test: lockout per cont
-
+# Testeaza lockout per cont: 10 parole gresite + 1 parola corecta
+# Vulnerable: Parola corectă → login reuseste 
+# Fixed: Parola corecta → login refuzat (cont blocat) 
 
 set +e
-set +o pipefail
-
 source "$(dirname "$0")/config.sh"
 
-EMAIL="$1"
-if [ -z "$EMAIL" ]; then
-  echo "Usage: $0 <existing_email>"
-  exit 2
+EMAIL="${1:-}"
+CORRECT_PASS="${2:-}"
+
+if [ -z "$EMAIL" ] || [ -z "$CORRECT_PASS" ]; then
+    echo "Usage: $0 <email> <correct_password>"
+    exit 2
 fi
 
 LOGIN_URL="$BASE_URL/login"
-DB_PATH="$(dirname "$0")/../backend/db/Break-the-Login.db"
-
 OUT_FILE="$OUT_DIR/43_lockout_$(date +%s).txt"
 mkdir -p "$OUT_DIR"
 : > "$OUT_FILE"
 
-if [ -f "$(dirname "$0")/4.3_unlock_acc.sh" ]; then
-  echo "[INFO] Resetting account state..." | tee -a "$OUT_FILE"
-  "$(dirname "$0")/4.3_unlock_acc.sh" "$EMAIL" "$DB_PATH"
-  echo | tee -a "$OUT_FILE"
-fi
+echo "[4.3] Lockout per account — Correct password after attack" | tee -a "$OUT_FILE"
+echo "Email: $EMAIL" | tee -a "$OUT_FILE"
+echo "Strategy: 10 wrong passwords + 1 correct password" | tee -a "$OUT_FILE"
+echo | tee -a "$OUT_FILE"
 
-echo "[STEP] Sending failed login attempts..." | tee -a "$OUT_FILE"
+# Step 1: 10 failed attempts
+echo "[STEP 1] 10 failed login attempts" | tee -a "$OUT_FILE"
 
-for i in $(seq 1 12); do
-  res="$(curl -s -i -X POST "$LOGIN_URL" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"wrong$i\"}")"
-
-  code="$(echo "$res" | awk 'NR==1{print $2}')"
-
-  echo "Try $i -> HTTP $code" | tee -a "$OUT_FILE"
-
-# evitam rate limiter
-  sleep 2
+for i in $(seq 1 10); do
+    CODE="$(curl -s -o /dev/null -w "%{http_code}" -X POST "$LOGIN_URL" \
+        -H "Content-Type: application/json" \
+        -d '{"email":"'"$EMAIL"'","password":"wrong'$i'"}')"
+    
+    echo "  Try $i -> HTTP $CODE" | tee -a "$OUT_FILE"
+    sleep 3  # 3s delay, evit rate limit per IP
 done
 
 echo | tee -a "$OUT_FILE"
 
-echo "[STEP] Checking DB state..." | tee -a "$OUT_FILE"
+# Step 2: Correct password
+echo "[STEP 2] Try CORRECT password" | tee -a "$OUT_FILE"
 
-RESULT="$(sqlite3 "$DB_PATH" \
-"SELECT failed_logins, locked_until FROM users WHERE email='$EMAIL';")"
+CODE_CORRECT="$(curl -s -o /dev/null -w "%{http_code}" -X POST "$LOGIN_URL" \
+    -H "Content-Type: application/json" \
+    -d '{"email":"'"$EMAIL"'","password":"'"$CORRECT_PASS"'"}')"
 
-FAILED="$(echo "$RESULT" | cut -d'|' -f1)"
-LOCKED="$(echo "$RESULT" | cut -d'|' -f2)"
-
-echo "DB state: failed_logins=$FAILED, locked_until=$LOCKED" | tee -a "$OUT_FILE"
+echo "  Correct password -> HTTP $CODE_CORRECT" | tee -a "$OUT_FILE"
 
 echo | tee -a "$OUT_FILE"
 echo "=== VERDICT ===" | tee -a "$OUT_FILE"
 
-if [ "$FAILED" -ge 10 ] && [ -n "$LOCKED" ]; then
-  echo "[FIXED] Lockout activ: cont blocat dupa prea multe incercari" | tee -a "$OUT_FILE"
-  exit 0
-else
-  echo "[VULNERABLE] Lockout nu functioneaza corect" | tee -a "$OUT_FILE"
-  exit 1
+if [ "$CODE_CORRECT" = "200" ]; then
+    echo "VULNERABLE: nu e lockout" | tee -a "$OUT_FILE"
+    exit 1
+elif [ "$CODE_CORRECT" = "401" ]; then
+    echo "FIXED: cont blocat" | tee -a "$OUT_FILE"
+    exit 0
 fi

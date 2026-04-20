@@ -46,11 +46,9 @@ func clientIP(r *http.Request) string {
 }
 
 func RateLimitLogin(next http.HandlerFunc) http.HandlerFunc {
-	// Ajusteaza pentru demo:
 	// ~10 requesturi/minut/IP, burst 10
 	limit := rate.Every(6 * time.Second)
 	burst := 10
-
 	// cleanup ca sa nu creasca map-ul
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
