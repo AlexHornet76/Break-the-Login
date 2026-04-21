@@ -158,7 +158,7 @@ func ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var userID int
 	err := db.DB.QueryRow("SELECT id FROM users WHERE email = ?", body.Email).Scan(&userID)
 	if err != nil {
-		// VULNERABIL: mesaj diferit confirmă că emailul NU există
+		// VULNERABIL: mesaj diferit
 		http.Error(w, `{"error":"Email negasit"}`, 404)
 		return
 	}
