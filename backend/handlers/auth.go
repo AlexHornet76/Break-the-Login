@@ -198,9 +198,9 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// stochează parola noua in clar
+	// stocheaza parola noua in clar
 	db.DB.Exec("UPDATE users SET password = ? WHERE id = ?", body.Password, userID)
-	//nu marcheaza tokenul ca folosit — poate fi reutilizat!
+	//nu marcheaza tokenul ca folosit — poate fi reutilizat
 
 	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
 		userID, "RESET_PASSWORD", r.RemoteAddr)

@@ -10,8 +10,8 @@ source "$(dirname "$0")/config.sh"
 EMAIL="${1:-}"
 PASS="${2:-}"
 
-if [ -z "$EMAIL" ] || [ -z "$PASS" ]; then
-    echo "Usage: $0 <email> <password>"
+if [ -z "$EMAIL" ]; then
+    echo "Usage: $0 <email>"
     exit 2
 fi
 
