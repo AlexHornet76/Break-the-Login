@@ -178,7 +178,6 @@ func UpdateTicketByID(w http.ResponseWriter, r *http.Request) {
 	var req UpdateTicketRequest
 	json.NewDecoder(r.Body).Decode(&req)
 
-	// V1: update “naiv” – daca field e gol, il seteaza gol
 	_, err = db.DB.Exec(
 		"UPDATE tickets SET title = ?, description = ?, severity = ?, status = ?, updated_at = ? WHERE id = ?",
 		req.Title, req.Description, req.Severity, req.Status, time.Now(), ticketID,
