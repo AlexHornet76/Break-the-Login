@@ -272,6 +272,9 @@ func Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, _ = db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
+		userID, "ME", r.RemoteAddr)
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"user_id": userID,
