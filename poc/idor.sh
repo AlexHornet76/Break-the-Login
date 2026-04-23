@@ -9,9 +9,9 @@ BASE="$BASE_URL"
 
 # Configurare utilizatori
 VICTIM_EMAIL="victim@yahoo.com"
-VICTIM_PASS="Victim@123"
+VICTIM_PASS="VictimPass123!"
 ATTACKER_EMAIL="attacker@yahoo.com"
-ATTACKER_PASS="Attacker@123"
+ATTACKER_PASS="AttackerPass123!"
 
 log() { echo "$*"; }
 
@@ -79,4 +79,8 @@ log ""
 log "=== VERDICT ==="
 [ "$CODE"  = "200" ] && log "[VULNERABIL] IDOR GET:  atacatorul a citit ticketul victimei"   || log "[OK] GET blocat"
 [ "$CODE2" = "200" ] && log "[VULNERABIL] IDOR PUT:  atacatorul a modificat ticketul victimei" || log "[OK] PUT blocat"
-[ "$CODE3" = "200" ] && log "[VULNERABIL] LIST ALL:  atacatorul vede toate ticketele"          || log "[OK] LIST blocat"
+if [ "$CODE3" = "200" ] && [ "$COUNT" -gt 0 ]; then
+    log "[VULNERABIL] LIST ALL: atacatorul vede $COUNT tickete ale altora"
+else
+    log "[OK] LIST ALL: atacatorul vede doar propriile tickete ($COUNT)"
+fi

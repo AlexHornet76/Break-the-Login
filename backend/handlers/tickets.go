@@ -23,6 +23,9 @@ type UpdateTicketRequest struct {
 	Status      string `json:"status"`
 }
 
+var validSeverities = map[string]bool{"LOW": true, "MEDIUM": true, "HIGH": true}
+var validStatuses = map[string]bool{"OPEN": true, "IN_PROGRESS": true, "CLOSED": true}
+
 // POST /api/tickets
 func CreateTicket(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromRequest(r)
@@ -39,9 +42,14 @@ func CreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//fara validare pe severity/status (accepta orice)
 	if req.Severity == "" {
 		req.Severity = "LOW"
+	}
+
+	// validare severity
+	if !validSeverities[req.Severity] {
+		http.Error(w, `{"error":"Severity invalid. Valori acceptate: LOW, MEDIUM, HIGH"}`, 400)
+		return
 	}
 
 	res, err := db.DB.Exec(
@@ -55,7 +63,6 @@ func CreateTicket(w http.ResponseWriter, r *http.Request) {
 
 	ticketID, _ := res.LastInsertId()
 
-	// audit log
 	db.DB.Exec("INSERT INTO audit_logs (user_id, action, ip_address) VALUES (?, ?, ?)",
 		userID, "CREATE_TICKET", r.RemoteAddr)
 
@@ -66,7 +73,7 @@ func CreateTicket(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/tickets (VULNERABIL: returneaza toate ticket-urile tuturor)
+// GET /api/tickets — returneaza doar ticketele userului autentificat
 func ListTickets(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromRequest(r)
 	if err != nil {
@@ -74,7 +81,11 @@ func ListTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.DB.Query("SELECT id, title, description, severity, status, owner_id, created_at, updated_at FROM tickets ORDER BY id DESC")
+	// FIX IDOR: filtram dupa owner_id
+	rows, err := db.DB.Query(
+		"SELECT id, title, description, severity, status, owner_id, created_at, updated_at FROM tickets WHERE owner_id = ? ORDER BY id DESC",
+		userID,
+	)
 	if err != nil {
 		http.Error(w, `{"error":"Eroare DB"}`, 500)
 		return
@@ -107,7 +118,7 @@ func ListTickets(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// GET /api/tickets/{id} (VULNERABIL: IDOR - nu verifica owner_id)
+// GET /api/tickets/{id}
 func GetTicketByID(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromRequest(r)
 	if err != nil {
@@ -115,7 +126,6 @@ func GetTicketByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// extrage id din URL: /api/tickets/{id}
 	idStr := strings.TrimPrefix(r.URL.Path, "/api/tickets/")
 	ticketID, err := strconv.Atoi(idStr)
 	if err != nil {
@@ -134,12 +144,14 @@ func GetTicketByID(w http.ResponseWriter, r *http.Request) {
 		updatedAt   string
 	)
 
+	// FIX IDOR: WHERE id = ? AND owner_id = ?
 	err = db.DB.QueryRow(
-		"SELECT id, title, description, severity, status, owner_id, created_at, updated_at FROM tickets WHERE id = ?",
-		ticketID,
+		"SELECT id, title, description, severity, status, owner_id, created_at, updated_at FROM tickets WHERE id = ? AND owner_id = ?",
+		ticketID, userID,
 	).Scan(&id, &title, &description, &severity, &status, &ownerID, &createdAt, &updatedAt)
 
 	if err != nil {
+		// returnam 404 intentionat — nu confirmam existenta ticketului
 		http.Error(w, `{"error":"Ticket inexistent"}`, 404)
 		return
 	}
@@ -160,7 +172,7 @@ func GetTicketByID(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PUT /api/tickets/{id} (VULNERABIL: IDOR - nu verifica owner_id)
+// PUT /api/tickets/{id}
 func UpdateTicketByID(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromRequest(r)
 	if err != nil {
@@ -175,13 +187,34 @@ func UpdateTicketByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FIX IDOR: verificam ownership inainte de orice modificare
+	var ownerID int
+	err = db.DB.QueryRow("SELECT owner_id FROM tickets WHERE id = ?", ticketID).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		// 404 intentionat — nu confirmam existenta ticketului
+		http.Error(w, `{"error":"Ticket inexistent"}`, 404)
+		return
+	}
+
 	var req UpdateTicketRequest
 	json.NewDecoder(r.Body).Decode(&req)
 
-	// V1: update “naiv” – daca field e gol, il seteaza gol
+	// validare severity
+	if req.Severity != "" && !validSeverities[req.Severity] {
+		http.Error(w, `{"error":"Severity invalid. Valori acceptate: LOW, MEDIUM, HIGH"}`, 400)
+		return
+	}
+
+	// validare status
+	if req.Status != "" && !validStatuses[req.Status] {
+		http.Error(w, `{"error":"Status invalid. Valori acceptate: OPEN, IN_PROGRESS, CLOSED"}`, 400)
+		return
+	}
+
+	// FIX IDOR: WHERE id = ? AND owner_id = ? — dubla protectie
 	_, err = db.DB.Exec(
-		"UPDATE tickets SET title = ?, description = ?, severity = ?, status = ?, updated_at = ? WHERE id = ?",
-		req.Title, req.Description, req.Severity, req.Status, time.Now(), ticketID,
+		"UPDATE tickets SET title = ?, description = ?, severity = ?, status = ?, updated_at = ? WHERE id = ? AND owner_id = ?",
+		req.Title, req.Description, req.Severity, req.Status, time.Now(), ticketID, userID,
 	)
 	if err != nil {
 		http.Error(w, `{"error":"Eroare DB"}`, 500)
