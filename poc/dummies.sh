@@ -17,10 +17,10 @@ log() { echo "$*" | tee -a "$OUT_FILE"; }
 
 # user-ii de test
 ATTACKER_EMAIL="attacker@yahoo.com"
-ATTACKER_PASS="AttackerPass123!"
+ATTACKER_PASS="Attacker@123"
 
 VICTIM_EMAIL="victim@yahoo.com"
-VICTIM_PASS="VictimPass123!"
+VICTIM_PASS="Victim@123"
 
 
 # inregistreaza attacker
